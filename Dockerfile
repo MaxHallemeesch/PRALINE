@@ -2,7 +2,7 @@ FROM gitlab.ilabt.imec.be:4567/ilabt/gpu-docker-stacks/pytorch-notebook:cuda12-l
 
 USER root
 
-COPY requirements_test.txt .
+COPY requirements.txt .
 
 RUN apt-get update \
         && apt-get -y install openslide-tools \

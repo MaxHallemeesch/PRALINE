@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch
 from einops import rearrange
-from vit_new import train, ViT, evaluate, PriorKnowledgeLinearBalanced, PriorKnowledgeLinearUnbalanced
+from vit_new import PriorKnowledgeLinearBalanced
 
 
 class SummaryMixing(nn.Module):

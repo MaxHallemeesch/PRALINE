@@ -6,7 +6,7 @@ from torch import nn
 import os
 from tqdm import tqdm
 import numpy as np
-from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, mean_squared_error
+from sklearn.metrics import mean_absolute_error
 
 from einops import rearrange
 from he2rna import compute_correlations
@@ -36,8 +36,6 @@ def posemb_sincos_2d(patches, temperature = 10000, dtype = torch.float32):
 
 def smape(A, F):
     return 100/len(A) * np.sum(2 * np.abs(F - A) / (np.abs(A) + np.abs(F)))
-
-# classes
 
 class FeedForward(nn.Module):
     def __init__(self, dim, hidden_dim):
@@ -106,20 +104,6 @@ class PriorKnowledgeLinearBalanced(nn.Module):
 
     def forward(self, x):
         return torch.nn.functional.linear(x, (1 - self.lam)*self.Y + self.lam * self.gene_embeddings, self.bias)
-    
-
-class PriorKnowledgeLinearUnbalanced(nn.Module):
-    def __init__(self, hidden_dim, num_outputs, lam, gene_embeddings, device='cuda'):
-        super().__init__()
-        self.Y = nn.Parameter(torch.randn(hidden_dim, num_outputs)).to(device)
-        self.gene_embeddings = torch.tensor(gene_embeddings, requires_grad=False).to(device)
-        self.lam = lam
-        self.device = device
-
-    def forward(self, x):
-        W = self.Y + self.lam * self.gene_embeddings
-        return torch.matmul(x, W)
-
 
 class ViT(nn.Module):
     def __init__(self, *, num_outputs, dim, depth, heads, mlp_dim, dim_head = 64,
@@ -152,27 +136,15 @@ class ViTPriorKnowledgeBalanced(nn.Module):
                 num_clusters=100, device='cuda'):
         super().__init__()
 
-        ## 
-        print(f"Specs: {num_outputs} and {dim}")
-        ##
-
         self.pos_emb1D = nn.Parameter(torch.randn(num_clusters, dim))
 
         self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim)
 
-        # TIJDELIJK
-        self.scale = nn.Sequential(
-            nn.LayerNorm(1024),
-            nn.Linear(in_features=1024, out_features=768)
-        )
-
-        #self.scale = nn.Linear(in_features=2048, out_features=768)
-
         self.to_latent = nn.Identity()
         self.linear_head = nn.Sequential(
             #768 and dim
-            nn.LayerNorm(768),
-            PriorKnowledgeLinearBalanced(hidden_dim=768, num_outputs=num_outputs, lam=lam, gene_embeddings=gene_embeddings)
+            nn.LayerNorm(dim),
+            PriorKnowledgeLinearBalanced(hidden_dim=dim, num_outputs=num_outputs, lam=lam, gene_embeddings=gene_embeddings)
         )
 
 
@@ -184,7 +156,6 @@ class ViTPriorKnowledgeBalanced(nn.Module):
 
         x = self.transformer(x)
         x = x.mean(dim = 1)
-        x = self.scale(x)
 
         x = self.to_latent(x)
         return self.linear_head(x)
@@ -194,23 +165,18 @@ class MLPPriorKnowledgeBalanced(nn.Module):
                 num_clusters=100, device='cuda'):
         super().__init__()
 
-        ## 
-        print(f"Specs: {num_outputs} and {dim}")
-        ##
-
         self.pos_emb1D = nn.Parameter(torch.randn(num_clusters, dim))
 
         self.mlp = nn.Sequential(
-            nn.Linear(dim, 768),
+            nn.Linear(dim, dim),
             nn.ReLU(),
-            nn.Linear(768, 768),
+            nn.Linear(dim, dim),
         )
 
         self.to_latent = nn.Identity()
         self.linear_head = nn.Sequential(
-            #768 and dim
-            nn.LayerNorm(768),
-            PriorKnowledgeLinearBalanced(hidden_dim=768, num_outputs=num_outputs, lam=lam, gene_embeddings=gene_embeddings)
+            nn.LayerNorm(dim),
+            PriorKnowledgeLinearBalanced(hidden_dim=dim, num_outputs=num_outputs, lam=lam, gene_embeddings=gene_embeddings)
         )
 
 
@@ -225,26 +191,6 @@ class MLPPriorKnowledgeBalanced(nn.Module):
 
         x = self.to_latent(x)
         return self.linear_head(x)
-
-class ViTPriorKnowledgeUnbalanced(nn.Module):
-    def __init__(self, *, num_outputs, dim, depth, heads, mlp_dim, lam, gene_embeddings, dim_head = 64,
-                num_clusters=100, device='cuda'):
-        super().__init__()
-
-        ## 
-        print(f"Specs: {num_outputs} and {dim}")
-        ##
-
-        self.pos_emb1D = nn.Parameter(torch.randn(num_clusters, dim))
-
-        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim)
-
-        self.to_latent = nn.Identity()
-        self.linear_head = nn.Sequential(
-            nn.LayerNorm(dim),
-            PriorKnowledgeLinearUnbalanced(hidden_dim=dim, num_outputs=num_outputs, lam=lam, gene_embeddings=gene_embeddings)
-        )
-        self.device = device
 
     def forward(self, x):
         #pe = posemb_sincos_2d(x)
@@ -327,11 +273,6 @@ def train(model, dataloaders, optimizer, accelerator=None,
 
             if split is None:
                 split=''
-            
-            if run:
-                run.log({'epoch': epoch, f'{phase} score {split}': scores[phase]})
-                run.log({'epoch': epoch, f'{phase} loss {split}': losses[phase]})
-                run.log({'epoch': epoch, f'{phase} mae {split}': maes[phase]})
         
             if verbose:
                 print(f'Epoch {epoch}: {phase} loss {losses[phase]} mae {maes[phase]}')
@@ -414,10 +355,6 @@ def evaluate(model, dataloader, dataset, run=None, verbose=True, suff=''):
     losses = np.mean(losses)
     maes = np.mean(maes)
     smapes = np.mean(smapes)
-    if run:
-        run.log({f'{dataset}_loss'+suff: losses})
-        run.log({f'{dataset}_MAE'+suff: maes})
-        run.log({f'{dataset}_MAPE'+suff: smapes})
     if verbose:
         print(f'{dataset} loss: {losses}')
         print(f'{dataset} MAE: {mae}')

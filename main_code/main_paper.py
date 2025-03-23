@@ -4,7 +4,6 @@ import pickle
 
 import h5py
 from torch.utils.data import DataLoader
-import wandb
 import torch.nn as nn
 import random
 
@@ -12,8 +11,6 @@ from read_data import *
 from utils import patient_kfold 
 from vit_new import train, ViT, evaluate, ViTPriorKnowledgeBalanced, MLPPriorKnowledgeBalanced
 from summarymixer import ViS, ViSPriorKnowledgeBalanced
-
-import json
 
 def custom_collate_fn(batch):
     """Remove bad entries from the dataloader
@@ -31,19 +28,11 @@ def filter_no_features(df, feature_path):
     all_wsis_with_features = []
     remove = []
     for proj in projects:
-        #ctrans
         wsis_with_features = os.listdir(feature_path)
-
-        #resnet
-        #wsis_with_features = os.listdir(feature_path + proj)
 
         # filter the ones without cluster_features
         for wsi in wsis_with_features:
             try:
-                #resnet
-                #with h5py.File(feature_path +proj+ '/'+wsi+'/'+wsi+'.h5', "r") as f:
-
-                #ctrans
                 with h5py.File(feature_path + '/' + wsi, "r") as f:
                     cols = list(f.keys())
                     if 'cluster_mean_features' not in cols:
@@ -53,11 +42,8 @@ def filter_no_features(df, feature_path):
                 print(f"[LOG] removed {wsi} due to {e}")
                 remove.append(wsi)
 
-        #ctrans
         all_wsis_with_features += [name.split('.h5')[0] for name in wsis_with_features if name not in remove]
 
-        #resnet
-        #all_wsis_with_features += wsis_with_features
 
     remove += df[~df['wsi_file_name'].isin(all_wsis_with_features)].wsi_file_name.values.tolist()
     print(f'[LOG] Original shape: {df.shape}')
@@ -84,7 +70,6 @@ if __name__ == '__main__':
     # general args
     parser.add_argument('--src_path', type=str, default='.', help='project path')
     parser.add_argument('--ref_file', type=str, default=None, help='path to reference file')
-    parser.add_argument('--tcga_projects', help="the tcga_projects we want to use, separated by comma", default=None, type=str)
     parser.add_argument('--feature_path', type=str, default="/oak/stanford/groups/ogevaert/data/Gen-Pred/features_resnet/", help='path to resnet and clustered features')
     parser.add_argument('--feature_dim', type=int, default=2048, help='kmean feature dimension')
     parser.add_argument('--save_dir', type=str, default='vit_exp', help='parent destination folder')
@@ -99,7 +84,6 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=99, help='Seed for random generation')
     parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
     parser.add_argument('--batch_size', type=int, default=16, help='Batch size')
-    parser.add_argument('--gtex', type=int, default=0)
     parser.add_argument('--checkpoint', type=str, default=None, help='Checkpoint from trained model. If tcga_pretrain is true, then the model paths in different folds should be of the format args.checkpoint + "{fold}.pt" ')
     parser.add_argument('--train', help="if you want to train the model", action="store_true")
     parser.add_argument('--filter_genes', type=str, default=None, help='path to a npy file containing a list of genes of interest for training')
@@ -115,9 +99,7 @@ if __name__ == '__main__':
     parser.add_argument('--model_version', type=str, default='None', help='which architecture to use: Balanced or Unbalanced or Regularized')
     parser.add_argument('--priorknowledge_type', type=str, default="None", help="external or internal")
     parser.add_argument('--gene_embeddings_path', type=str, default='gene_embeddings/', help='path to the folder that contains gene embeddings')
-    parser.add_argument('--gene_embeddings', type=str, default='embeddings_BRCA_CE_normalized.npy', help='path to the file that contains the gene embeddings')
     parser.add_argument('--lam', type=float, default=0, help='value of the lambda hyperparameter')
-    parser.add_argument('--r_threshold', type=float, default = 1, help="threshold of correlation for co-expression when using internal prior knowledge. Options are: 0.85, 0.75, 0.65")
 
     # testing
     parser.add_argument('--testing', type=int, default=0, help='decrease the amount of slides to run a quick test')
@@ -129,10 +111,8 @@ if __name__ == '__main__':
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     random.seed(args.seed)
-    #os.environ["CUBLAS_WORKSPACE_CONFIG"]=":4096:2" # needed for torch.use_determ (below) --> still throws the same error
-    torch.backends.cudnn.benchmark = False # possibly reduced performance but better reproducibility
+    torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
-    #torch.use_deterministic_algorithms(True)
 
     # reproducibility train dataloader
     def seed_worker(worker_id):
@@ -141,7 +121,6 @@ if __name__ == '__main__':
         random.seed(worker_seed)
     g = torch.Generator()
     g.manual_seed(0)
-
     print(f"[LOG] using seed: {g}")
 
     ############################################## logging ##############################################
@@ -150,27 +129,10 @@ if __name__ == '__main__':
         os.makedirs(save_dir)
 
     run = None
-    if args.log:
-        print("[LOG] trying to login wandb")
-        wandb.login(key="3e7959a551c0e9b3c350df33b741771da9df8ea7")
-        run = wandb.init(project="thesis", entity='maxhallemeesch', config=args, name=args.exp_name) 
     
     device = torch.device("cuda:0" if (torch.cuda.is_available()) else "cpu")
     print(torch.cuda.is_available())
     print(f"[LOG] Using device {device}")
-
-    parameters = {
-        "model_type":args.model_type,
-        "model_version":args.model_version,
-        "priorknowledge":args.priorknowledge_type,
-        "embeddings":"NMF",
-        "lambda":args.lam
-    }
-
-    with open(os.path.join(save_dir, 'parameters.json'), 'w') as f:
-        json.dump(parameters, f)
-
-    print(f"[LOG] Logging parameters file in json format")
 
     ############################################## data prep ##############################################
     path_csv = args.ref_file
@@ -181,11 +143,6 @@ if __name__ == '__main__':
         df = df.iloc[:20]
         num_epochs = 5
         print("[LOG] reading 20 WSI's")
-
-    # filter tcga projects
-    if ('tcga_project' in df.columns) and (args.tcga_projects != None):
-        projects = args.tcga_projects.split(',')
-        df = df[df['tcga_project'].isin(projects)].reset_index(drop=True)
 
     print("[LOG] filtering slides whose cluster features do not exist")
     df = filter_no_features(df, args.feature_path)
@@ -209,13 +166,11 @@ if __name__ == '__main__':
             test_idxs.append(np.load(os.path.join(args.src_path, args.save_dir, args.cohort, args.checkpoint, 'test_'+str(i)+'.npy')), allow_pickle=True)
     
     # extract gene embeddings once if type of prior knowledge is external
-    if args.priorknowledge_type == "external" or args.priorknowledge_type == "random":
-        gene_embeddings_location = os.path.join(args.src_path, args.gene_embeddings_path, args.priorknowledge_type, args.gene_embeddings)
-        with open(gene_embeddings_location + '.npy', 'rb') as file:
+    if args.priorknowledge_type == "external":
+        with open(args.gene_embeddings_path, 'rb') as file:
             gene_embeddings = np.load(file, allow_pickle=True)
 
         gene_embeddings = torch.Tensor(gene_embeddings)
-        print(f"[LOG] External Gene Embeddings: {gene_embeddings}")
         print(f"[LOG] External Gene Embeddings Shape: {gene_embeddings.size()}")
 
     ############################################## kfold ##############################################
@@ -261,43 +216,30 @@ if __name__ == '__main__':
 
         # extract different gene embeddings for each fold if priorknowledge type is internal
         if args.priorknowledge_type == "internal" or args.priorknowledge_type == "combined":
-            gene_embeddings_location = os.path.join(args.src_path, args.gene_embeddings_path, args.priorknowledge_type, args.gene_embeddings + "_R"+ str(args.r_threshold) + "_fold" + str(i))
-            with open(gene_embeddings_location + '.npy', 'rb') as file:
+            gene_embeddings_path = os.path.join(args.gene_embeddings_path + "_fold" + str(i))
+            with open(gene_embeddings_path + '.npy', 'rb') as file:
                 gene_embeddings = np.load(file, allow_pickle=True)
-                print("internal succeeded")
-                print(gene_embeddings.shape)
 
             gene_embeddings = torch.Tensor(gene_embeddings)
             print(f"[LOG] {args.priorknowledge_type} Gene Embeddings Fold {i}: {gene_embeddings}")
             print(f"[LOG] {args.priorknowledge_type} Gene Embeddings Fold {i} Shape: {gene_embeddings.size()}")
 
         # load correct model architecture (type and version)
-        if args.model_type == 'vis' and args.model_version == 'Regular':
+        if args.model_type == 'vis' and args.model_version == 'NoPK':
             model = ViS(num_outputs=num_outputs, input_dim=args.feature_dim, depth=args.depth, nheads=args.num_heads, dimensions_f=64, dimensions_c=64, dimensions_s=64, device=device) 
-        elif args.model_type == 'vis' and args.model_version == 'Balanced':
+        elif args.model_type == 'vis' and args.model_version == 'PK':
             model = ViSPriorKnowledgeBalanced(num_outputs=num_outputs, input_dim=args.feature_dim, depth=args.depth, nheads=args.num_heads,  dimensions_f=64, dimensions_c=64, dimensions_s=64, device=device, lam=args.lam, gene_embeddings=gene_embeddings)
-        elif args.model_type == 'vit' and args.model_version == "Regular":
+        elif args.model_type == 'vit' and args.model_version == "NoPK":
             model = ViT(num_outputs=num_outputs, dim=args.feature_dim, depth=6, heads=16, mlp_dim=args.feature_dim, dim_head = 64)
-        elif args.model_type == 'vit' and args.model_version == 'Balanced':
+        elif args.model_type == 'vit' and args.model_version == 'PK':
             model = ViTPriorKnowledgeBalanced(num_outputs=args.num_genes, dim=args.feature_dim, depth=6, heads=16, mlp_dim=args.feature_dim, dim_head = 64, lam=args.lam, gene_embeddings=gene_embeddings)
-        elif args.model_type == 'mlp' and args.model_version == 'Balanced':
+        elif args.model_type == 'mlp' and args.model_version == 'PK':
             model = MLPPriorKnowledgeBalanced(num_outputs=args.num_genes, dim=args.feature_dim, lam=args.lam, gene_embeddings=gene_embeddings)
 
         else:
             print('please specify correct model type "vit" or "vis" and model version "Unbalanced", "Balanced"')
         print(f"[LOG] Model loaded: {args.model_type} in version {args.model_version}")
-
-        # load trained model from gtex for vit
-        if args.gtex and args.model_type =='vit':
-            path = args.checkpoint
-            model.load_state_dict(torch.load(path))
             
-            model.linear_head = nn.Sequential(
-                nn.LayerNorm(args.feature_dim),
-                nn.Linear(args.feature_dim, num_outputs)
-        )
-            
-        
         # load models for evaluation
         if not args.train and args.checkpoint and not args.change_num_genes:
             print("[LOG] Loading checkpoint from trained model...")
@@ -328,28 +270,26 @@ if __name__ == '__main__':
 
         # initialize a random model with same architecture (type and version)
         print("[LOG] initializing random model")
-        if args.model_type == 'vis' and args.model_version == 'Regular':
+        if args.model_type == 'vis' and args.model_version == 'NoPK':
             random_model = ViS(num_outputs=num_outputs, input_dim=args.feature_dim, depth=args.depth, nheads=args.num_heads, dimensions_f=64, dimensions_c=64, dimensions_s=64, device=device)  
-        elif args.model_type == 'vis' and args.model_version == 'Balanced':
+        elif args.model_type == 'vis' and args.model_version == 'PK':
             random_model = ViSPriorKnowledgeBalanced(num_outputs=num_outputs, input_dim=args.feature_dim, depth=args.depth, nheads=args.num_heads,  dimensions_f=64, dimensions_c=64, dimensions_s=64, device=device, lam=args.lam, gene_embeddings=gene_embeddings)
-        elif args.model_type == 'vit' and args.model_version == 'Regular':
+        elif args.model_type == 'vit' and args.model_version == 'NoPK':
             random_model = ViT(num_outputs=num_outputs, dim=args.feature_dim, depth=6, heads=16, mlp_dim=args.feature_dim, dim_head = 64)
-        elif args.model_type == 'vit' and args.model_version == 'Balanced':
+        elif args.model_type == 'vit' and args.model_version == 'PK':
             random_model = ViTPriorKnowledgeBalanced(num_outputs=args.num_genes, dim=args.feature_dim, depth=6, heads=16, mlp_dim=args.feature_dim, dim_head = 64, lam=args.lam, gene_embeddings=gene_embeddings)
-        elif args.model_type == 'mlp' and args.model_version == 'Balanced':
+        elif args.model_type == 'mlp' and args.model_version == 'PK':
             random_model = MLPPriorKnowledgeBalanced(num_outputs=args.num_genes, dim=args.feature_dim, lam=args.lam, gene_embeddings=gene_embeddings)
 
         random_model = random_model.to(device)
         random_preds, _, _, _ = evaluate(random_model, test_dataloader, run=run, suff='_'+str(i)+'_rand', dataset='test')
 
-        # write results
         print("[LOG] writing results")
         test_results = {
             'real': real,
             'preds': preds,
             'random': random_preds,
             'wsi_file_name': wsis,
-            'tcga_project': projs,
             'genes':[x for x in df.columns if 'rna_' in x]
         }
 
@@ -361,8 +301,5 @@ if __name__ == '__main__':
         with open(os.path.join(save_dir, 'test_results.pkl'), 'wb') as f:
             pickle.dump(test_results_splits, f, protocol=pickle.HIGHEST_PROTOCOL)
     else:
-        print("[LOG]: Printed eval results")
         with open(os.path.join(save_dir, 'test_results_CPTAC.pkl'), 'wb') as f:
             pickle.dump(test_results_splits, f, protocol=pickle.HIGHEST_PROTOCOL)
-
-    wandb.finish()

@@ -27,10 +27,6 @@ class SuperTileRNADataset(Dataset):
     
     def __getitem__(self, idx):
         row = self.data.iloc[idx]
-        #resnet
-        #path = os.path.join(self.features_path, row['tcga_project'], 
-                            #row['wsi_file_name'], row['wsi_file_name']+'.h5')
-        #ctrans
         path = os.path.join(self.features_path, row['wsi_file_name'] + '.h5')
         rna_data = row[[x for x in row.keys() if 'rna_' in x]].values.astype(np.float32)
         rna_data = torch.tensor(rna_data, dtype=torch.float32)
@@ -38,7 +34,6 @@ class SuperTileRNADataset(Dataset):
             if 'GTEX' not in path:
                 path = path.replace('.svs','')
             f = h5py.File(path, 'r')
-            ## DAAAAAAAAAAAAAAMN
             features = f['cluster_mean_features'][:]
             f.close()
             features = torch.tensor(features, dtype=torch.float32)
