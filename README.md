@@ -9,7 +9,7 @@ architectures
 
 # Script templates for training, inference & gene embedding generation process
 
- 'evaluate.sh': inference
- 'train.sh': training
- 'embeddings.sh': generating gene embeddings from an adjacency matrix of genes
+ `evaluate.sh`: inference
+ `train.sh`: training
+ `embeddings.sh`: generating gene embeddings from an adjacency matrix of genes
 
